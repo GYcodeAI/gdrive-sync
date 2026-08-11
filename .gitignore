@@ -41,3 +41,4 @@ logs/
 # Claude Code 세션/워크트리 메타데이터 (settings.json만 공유)
 .claude/*
 !.claude/settings.json
+docs/INSTALL.pdf

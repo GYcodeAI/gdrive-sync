@@ -105,3 +105,44 @@ def test_unsupported_platform_raises():
             cm.install()
         with pytest.raises(RuntimeError):
             cm.remove()
+
+
+# ──────────────────────────────────────────────────────────
+# 바탕화면 바로가기 (PowerShell 은 mock)
+# ──────────────────────────────────────────────────────────
+
+def test_create_shortcut_returns_ps_output(monkeypatch):
+    monkeypatch.setattr(cm, "winreg", _fake_winreg())
+    captured = {}
+
+    def fake_ps(script):
+        captured["script"] = script
+        return r"C:\Users\u\Desktop\gdrive-sync.lnk"
+
+    monkeypatch.setattr(cm, "_run_shortcut_ps", fake_ps)
+    with patch.object(cm, "pythonw_executable", return_value=r"C:\Py\pythonw.exe"):
+        path = cm.create_desktop_shortcut()
+    assert path.endswith("gdrive-sync.lnk")
+    # 핵심 요소가 스크립트에 들어갔는지
+    assert "-m gdrive_sync gui" in captured["script"]
+    assert r"C:\Py\pythonw.exe" in captured["script"]
+    assert cm.SHORTCUT_FILENAME in captured["script"]
+
+
+def test_remove_shortcut_none_when_absent(monkeypatch):
+    monkeypatch.setattr(cm, "winreg", _fake_winreg())
+    monkeypatch.setattr(cm, "_run_shortcut_ps", lambda s: "")
+    assert cm.remove_desktop_shortcut() is None
+
+
+def test_remove_shortcut_returns_deleted_path(monkeypatch):
+    monkeypatch.setattr(cm, "winreg", _fake_winreg())
+    monkeypatch.setattr(cm, "_run_shortcut_ps",
+                        lambda s: r"C:\Users\u\Desktop\gdrive-sync.lnk")
+    assert cm.remove_desktop_shortcut().endswith(".lnk")
+
+
+def test_shortcut_unsupported_raises(monkeypatch):
+    monkeypatch.setattr(cm, "winreg", None)
+    with pytest.raises(RuntimeError):
+        cm.create_desktop_shortcut()

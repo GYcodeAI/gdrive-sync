@@ -1,8 +1,8 @@
 @echo off
 chcp 65001 >nul
 REM gdrive-sync 업데이트 (더블클릭 실행용)
-REM pip 으로 GitHub 저장소의 최신 버전을 설치합니다.
-REM 비공개 저장소인 경우 GitHub 로그인 창이 뜰 수 있습니다 (최초 1회).
+REM pip 으로 GitHub 공개 저장소의 최신 버전을 내려받아 설치합니다.
+REM 로그인·계정 불필요. Python 과 Git 만 설치돼 있으면 됩니다.
 
 echo.
 echo  gdrive-sync 업데이트를 시작합니다...
@@ -20,7 +20,7 @@ if %errorlevel%==0 (
     echo  업데이트 완료. 실행 중인 gdrive-sync 가 있다면 재시작하세요.
 ) else (
     echo.
-    echo  업데이트 실패. 인터넷 연결과 GitHub 접근 권한을 확인하세요.
+    echo  업데이트 실패. 인터넷 연결을 확인하고 잠시 후 다시 시도하세요.
 )
 echo.
 pause

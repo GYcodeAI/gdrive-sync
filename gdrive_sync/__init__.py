@@ -2,4 +2,4 @@
 
 # 릴리스 절차: 이 버전 올리기 → commit → git tag v<버전> → git push --tags
 # (pyproject.toml 은 이 값을 dynamic 으로 참조 — 여기 한 곳만 수정)
-__version__ = "2.4.0"
+__version__ = "2.4.1"

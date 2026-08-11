@@ -154,7 +154,7 @@ def init(ctx, force: bool):
     saved = save_config(template, cfg_path)
     click.secho(f"\n✓ 설정 저장: {saved}", fg="green")
     click.echo("\n다음 단계:")
-    click.echo("  1) credentials.json 파일을 프로젝트 폴더에 배치")
+    click.echo(f"  1) credentials.json 파일을 {Path.home() / '.gdrive_sync'} 에 배치")
     click.echo("  2) gdrive-sync auth  (최초 인증)")
     click.echo("  3) gdrive-sync test-connection")
     click.echo("  4) gdrive-sync sync --dry-run")
@@ -1274,6 +1274,43 @@ def context_menu_cmd(ctx, do_remove: bool, show_status: bool):
         click.echo(f"  - {path}")
     click.echo("바탕화면 또는 폴더 빈 공간에서 우클릭하면 나타납니다.")
     click.echo(f"실행 명령: {cm.launch_command()}")
+
+
+# ──────────────────────────────────────────────────────────
+# shortcut (v2.4.1 — 바탕화면 바로가기)
+# ──────────────────────────────────────────────────────────
+
+@main.command()
+@click.option("--remove", "do_remove", is_flag=True, help="바로가기 삭제")
+@click.pass_context
+def shortcut(ctx, do_remove: bool):
+    """바탕화면에 'gdrive-sync' GUI 바로가기 생성 (Windows).
+
+    모든 Windows 버전에서 동일하게 동작합니다. Windows 11 은 우클릭 메뉴
+    항목이 '추가 옵션 표시' 안에만 나오므로, 더블클릭 실행은 이 바로가기가
+    가장 간단합니다.
+    """
+    _setup_logging(verbose=ctx.obj["verbose"])
+    from gdrive_sync import context_menu as cm
+
+    if not cm.is_supported():
+        click.secho("이 명령은 Windows에서만 사용할 수 있습니다.", fg="red", err=True)
+        sys.exit(1)
+
+    try:
+        if do_remove:
+            removed = cm.remove_desktop_shortcut()
+            if removed:
+                click.secho(f"바로가기 삭제: {removed}", fg="green")
+            else:
+                click.echo("바탕화면에 바로가기가 없습니다.")
+        else:
+            path = cm.create_desktop_shortcut()
+            click.secho(f"바탕화면 바로가기 생성 완료: {path}", fg="green")
+            click.echo("더블클릭하면 콘솔 창 없이 GUI가 실행됩니다.")
+    except Exception as e:
+        click.secho(f"바로가기 처리 실패: {e}", fg="red", err=True)
+        sys.exit(1)
 
 
 # ──────────────────────────────────────────────────────────

@@ -110,3 +110,65 @@ def status() -> dict:
 def _ensure_supported() -> None:
     if not is_supported():
         raise RuntimeError("우클릭 메뉴 등록은 Windows에서만 지원됩니다.")
+
+
+# ──────────────────────────────────────────────────────────
+# 바탕화면 바로가기 (.lnk)
+#
+# Windows 11 의 새 우클릭 메뉴는 MSIX 패키지 앱만 최상위에 노출을 허용해서
+# 레지스트리 방식 항목은 "추가 옵션 표시" 안에만 나온다. 바로가기는 OS 버전
+# 무관하게 동작하는 공통 실행 수단.
+# ──────────────────────────────────────────────────────────
+
+SHORTCUT_FILENAME = "gdrive-sync.lnk"
+
+
+def _run_shortcut_ps(script: str) -> str:
+    """PowerShell 실행 (콘솔 창 없음). 실패 시 RuntimeError."""
+    import subprocess
+    result = subprocess.run(
+        ["powershell", "-NoProfile", "-Command", script],
+        capture_output=True, text=True, timeout=30,
+        creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"PowerShell 실패: {result.stderr.strip()[:300]}")
+    return result.stdout.strip()
+
+
+def create_desktop_shortcut() -> str:
+    """바탕화면에 GUI 실행 바로가기 생성. 생성된 .lnk 경로 반환.
+
+    바탕화면 경로는 WScript.Shell 로 해석 — OneDrive 로 리디렉션된
+    바탕화면(회사 PC 에 흔함)도 올바른 위치를 가리킨다.
+    """
+    _ensure_supported()
+    pythonw = pythonw_executable()
+    home = str(Path.home())
+    script = (
+        "$ws = New-Object -ComObject WScript.Shell; "
+        "$desktop = $ws.SpecialFolders('Desktop'); "
+        f"$lnk = $ws.CreateShortcut((Join-Path $desktop '{SHORTCUT_FILENAME}')); "
+        f"$lnk.TargetPath = '{pythonw}'; "
+        "$lnk.Arguments = '-m gdrive_sync gui'; "
+        f"$lnk.WorkingDirectory = '{home}'; "
+        f"$lnk.IconLocation = '{pythonw},0'; "
+        "$lnk.Description = 'gdrive-sync GUI'; "
+        "$lnk.Save(); "
+        "Write-Output $lnk.FullName"
+    )
+    path = _run_shortcut_ps(script)
+    logger.debug("바탕화면 바로가기 생성: %s", path)
+    return path
+
+
+def remove_desktop_shortcut() -> str | None:
+    """바탕화면 바로가기 삭제. 지운 경로 반환 (없었으면 None)."""
+    _ensure_supported()
+    script = (
+        "$ws = New-Object -ComObject WScript.Shell; "
+        f"$p = Join-Path $ws.SpecialFolders('Desktop') '{SHORTCUT_FILENAME}'; "
+        "if (Test-Path $p) { Remove-Item $p -Force; Write-Output $p }"
+    )
+    path = _run_shortcut_ps(script)
+    return path or None

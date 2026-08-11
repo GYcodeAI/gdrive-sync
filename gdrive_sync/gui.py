@@ -597,6 +597,9 @@ class SyncApp:
             command=self._on_normalize_filenames,
         )
         tools_menu.add_separator()
+        if sys.platform == "win32":
+            tools_menu.add_command(label="바탕화면 바로가기 만들기", command=self._on_create_shortcut)
+        tools_menu.add_separator()
         tools_menu.add_command(label="상태 초기화 (전체 재비교)...", command=self._on_reset_state)
         tools_menu.add_command(label="로그 지우기", command=self._clear_log)
         menubar.add_cascade(label="도구(T)", menu=tools_menu)
@@ -2423,6 +2426,17 @@ class SyncApp:
             f"Platform: {sys.platform}\n"
             f"설정: {DEFAULT_CONFIG_PATH}",
         )
+
+    def _on_create_shortcut(self) -> None:
+        """도구 메뉴 → 바탕화면 바로가기 만들기 (Windows 전용)."""
+        try:
+            from gdrive_sync.context_menu import create_desktop_shortcut
+            path = create_desktop_shortcut()
+            self.log_queue.put(("log", "SUCCESS", f"✓ 바탕화면 바로가기 생성: {path}"))
+            messagebox.showinfo("바로가기", f"바탕화면에 만들었습니다:\n{path}")
+        except Exception as e:
+            self.log_queue.put(("log", "ERROR", f"❌ 바로가기 생성 실패: {e}"))
+            messagebox.showwarning("바로가기", f"생성 실패: {e}")
 
     # ──────────────────────────────────────────────
     # 새 버전 확인 / 업데이트 (v2.4)
