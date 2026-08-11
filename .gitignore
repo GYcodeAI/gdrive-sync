@@ -1,0 +1,43 @@
+# 인증 파일 (절대 GitHub에 올리지 않음!)
+credentials.json
+token.json
+
+# 동기화 상태 (기기마다 다름)
+.gdrive_sync_state.json
+.gdrive_sync_trash/
+config.yaml
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# 가상환경
+.venv/
+venv/
+env/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 로그
+*.log
+logs/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Claude Code 세션/워크트리 메타데이터 (settings.json만 공유)
+.claude/*
+!.claude/settings.json

@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gdrive-sync"
+# 버전은 gdrive_sync/__init__.py 의 __version__ 한 곳에서만 관리
+dynamic = ["version"]
+description = "Cross-platform bidirectional Google Drive sync CLI"
+readme = "README.md"
+requires-python = ">=3.9"
+authors = [{ name = "gdrive-sync" }]
+license = { text = "MIT" }
+dependencies = [
+    "google-api-python-client>=2.100",
+    "google-auth-httplib2>=0.2",
+    "google-auth-oauthlib>=1.2",
+    "PySocks>=1.7.1",
+    "httplib2>=0.22",
+    "tqdm>=4.66",
+    "pyyaml>=6.0",
+    "click>=8.1",
+    # Windows 전용: 타이틀바 테마 제어 (라이트/다크/Mica)
+    # 다른 OS에선 설치 안 해도 동작 (ImportError 핸들링됨)
+    "pywinstyles>=1.8 ; sys_platform == 'win32'",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4",
+    "pytest-mock>=3.12",
+]
+
+[project.scripts]
+gdrive-sync = "gdrive_sync.cli:main"
+
+[tool.setuptools.dynamic]
+version = { attr = "gdrive_sync.__version__" }
+
+[tool.setuptools.packages.find]
+include = ["gdrive_sync*"]
+exclude = ["tests*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]

@@ -1,0 +1,159 @@
+# gdrive-sync 설정 예제 (v2)
+# 이 파일을 config.yaml로 복사해서 사용하세요:
+#   cp config.example.yaml ~/.gdrive_sync/config.yaml
+# 또는 대화형 초기화:
+#   gdrive-sync init
+#
+# 경로 팁: local_path에 ~로 시작하면 Windows/Mac/Linux 모두 호환됩니다.
+
+# ──────────────────────────────────────────────────────────
+# 동기화할 폴더 쌍
+# ──────────────────────────────────────────────────────────
+sync_pairs:
+  - local_path: "~/GDriveSync"
+    remote_path: "동기화테스트"
+
+# ──────────────────────────────────────────────────────────
+# 기기별 덮어쓰기 (선택)
+# ──────────────────────────────────────────────────────────
+# device_overrides:
+#   "DESKTOP-OFFICE":          # Windows hostname
+#     sync_pairs:
+#       - local_path: "D:/Work/Projects"
+#         remote_path: "업무/프로젝트"
+#   "MacBook-Home":            # Mac hostname
+#     sync_pairs:
+#       - local_path: "~/Projects"
+#         remote_path: "업무/프로젝트"
+
+# ──────────────────────────────────────────────────────────
+# 제외 패턴
+# ──────────────────────────────────────────────────────────
+exclude_patterns:
+  - "*.tmp"
+  - "*.log"
+  - "~$*"
+  - ".DS_Store"
+  - "Thumbs.db"
+  - "desktop.ini"
+  - "__pycache__/"
+  - ".git/"
+  - ".gdrive_sync_*"
+  - "*.lnk"
+  # ── 8자 랜덤 Office 임시파일 안전망 ──
+  # local_scanner의 정규식 필터(_RE_OFFICE_TEMP)가 1차 방어를 담당하고,
+  # 아래 패턴은 정규식이 못 잡는 변종 대비용 보조 방어선입니다.
+  # ※ fnmatch는 Windows에서 대소문자 무시 → 6~8자 [A-Z0-9] 짧은 이름의
+  #    실제 사용자 파일(예: REPORT1.DOCX)도 매치될 수 있으니 필요 시 주석 처리하세요.
+  - "[A-Z0-9][A-Z0-9][A-Z0-9][A-Z0-9][A-Z0-9][A-Z0-9].DOCX"
+  - "[A-Z0-9][A-Z0-9][A-Z0-9][A-Z0-9][A-Z0-9][A-Z0-9][A-Z0-9].DOCX"
+  - "[A-Z0-9][A-Z0-9][A-Z0-9][A-Z0-9][A-Z0-9][A-Z0-9][A-Z0-9][A-Z0-9].DOCX"
+  - "[A-Z0-9][A-Z0-9][A-Z0-9][A-Z0-9][A-Z0-9][A-Z0-9].docx"
+  - "[A-Z0-9][A-Z0-9][A-Z0-9][A-Z0-9][A-Z0-9][A-Z0-9][A-Z0-9].docx"
+  - "[A-Z0-9][A-Z0-9][A-Z0-9][A-Z0-9][A-Z0-9][A-Z0-9][A-Z0-9][A-Z0-9].docx"
+
+conflict_policy: "newer_wins"    # newer_wins | local_wins | remote_wins | keep_both
+delete_policy: "trash"            # trash | permanent | skip
+
+# ──────────────────────────────────────────────────────────
+# 네트워크
+# ──────────────────────────────────────────────────────────
+network:
+  use_proxy: false
+  proxy_type: "http"
+  proxy_host: ""
+  proxy_port: 0
+  proxy_username: ""
+  proxy_password: ""
+  use_system_proxy: true
+  timeout: 60
+  max_retries: 3
+  chunk_size: 8388608              # 기본 청크 크기 (8 MB)
+
+# ──────────────────────────────────────────────────────────
+# 성능 (병렬 전송, 청크 자동 조절)
+# ──────────────────────────────────────────────────────────
+performance:
+  parallel_transfers: 5            # 동시 전송 수 (1~10, 기본 5)
+  chunk_size_auto: true            # 파일 크기별 청크 자동 선택
+  chunk_size_medium: 8388608       # 5MB~100MB: 8MB 청크
+  chunk_size_large: 33554432       # 100MB 이상: 32MB 청크
+  # 참고:
+  # - 5MB 미만 파일은 simple upload (한 번의 POST, 청크 없음)
+  # - Google Drive Simple Upload 공식 한도가 5MB이므로 하드코딩됨
+
+# ──────────────────────────────────────────────────────────
+# 대역폭 제한 (회사망 과부하 방지)
+# ──────────────────────────────────────────────────────────
+# 단위: MB/s (1 MB = 1024 * 1024 bytes)
+# upload_limit_mbps = 0 이면 무제한
+bandwidth:
+  enabled: false                   # true로 바꿔야 적용됨
+  upload_limit_mbps: 0             # 기본(스케줄 밖) 업로드 제한
+  download_limit_mbps: 0
+
+  # 시간대별 규칙 (위에서부터 검사, 처음 매치되는 규칙 적용)
+  # 자정을 넘어가는 시간대(예: 22:00~07:00)도 정상 처리됨
+  schedule:
+    # - name: "업무시간"
+    #   time_start: "09:00"
+    #   time_end: "18:00"
+    #   weekdays: ["mon", "tue", "wed", "thu", "fri"]
+    #   upload_limit_mbps: 2.0     # 업무시간 업로드 제한
+    #   download_limit_mbps: 3.0
+    # - name: "점심시간"
+    #   time_start: "12:00"
+    #   time_end: "13:00"
+    #   weekdays: ["mon", "tue", "wed", "thu", "fri"]
+    #   upload_limit_mbps: 0       # 점심엔 무제한
+    #   download_limit_mbps: 0
+    # - name: "야간"
+    #   time_start: "22:00"
+    #   time_end: "07:00"          # 다음 날로 넘어감
+    #   upload_limit_mbps: 0
+    #   download_limit_mbps: 0
+
+# ──────────────────────────────────────────────────────────
+# 예약 작업 (OS 네이티브 스케줄러에 등록)
+# ──────────────────────────────────────────────────────────
+# 등록 방법:
+#   1) 여기에 jobs 정의 후
+#   2) gdrive-sync schedule install-from-config
+#
+# 또는 CLI로 직접:
+#   gdrive-sync schedule add --name 점심동기화 --type daily --time 12:00 --options "--no-limit"
+#
+# 지원 OS:
+#   Windows: schtasks → 작업 스케줄러
+#   macOS:   launchd → ~/Library/LaunchAgents/com.gdrive-sync.<name>.plist
+#   Linux:   crontab
+scheduler:
+  enabled: false
+  jobs:
+    # - name: "점심_동기화"
+    #   type: "daily"                 # daily | weekly | hourly | interval
+    #   time: "12:00"
+    #   options: "--no-limit"
+    # - name: "퇴근후_동기화"
+    #   type: "weekly"
+    #   time: "18:30"
+    #   weekdays: ["mon", "tue", "wed", "thu", "fri"]
+    #   options: "--no-limit"
+    # - name: "주말_전체갱신"
+    #   type: "weekly"
+    #   time: "10:00"
+    #   weekdays: ["sat"]
+    #   options: "--no-limit"
+    # - name: "매시간_체크"
+    #   type: "hourly"
+    #   minute: 15
+    #   options: ""
+    # - name: "cron_예시"
+    #   cron: "0 12 * * 1-5"          # 평일 12:00 (기본 cron 패턴만 지원)
+    #   options: "--no-limit"
+
+# ──────────────────────────────────────────────────────────
+# 로깅
+# ──────────────────────────────────────────────────────────
+log_level: "INFO"                  # DEBUG | INFO | WARNING | ERROR
+log_file: "gdrive_sync.log"
