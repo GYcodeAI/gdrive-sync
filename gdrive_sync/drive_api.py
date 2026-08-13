@@ -49,6 +49,38 @@ _HTTPLIB2_REDIRECT_BUG = (
     httplib2.RedirectLimit,
 )
 
+# Drive API 는 호출 속도 제한을 429 뿐 아니라 403(userRateLimitExceeded 등)으로도
+# 반환한다. 403 은 권한 오류와 구분해야 하므로 reason 을 확인해 rate limit 일 때만
+# 재시도 대상으로 판정한다. (2026-08-13: 대량 병렬 업로드에서 403 즉시실패
+# 19,180건 발생 사례 — v2.4.2)
+_RATE_LIMIT_REASONS = frozenset({
+    "userRateLimitExceeded", "rateLimitExceeded", "dailyLimitExceeded",
+})
+
+
+def _is_rate_limit_403(e: HttpError) -> bool:
+    """403 HttpError 가 속도 제한(재시도 가능)인지 판정."""
+    try:
+        for d in (getattr(e, "error_details", None) or []):
+            if isinstance(d, dict) and d.get("reason") in _RATE_LIMIT_REASONS:
+                return True
+        # 구버전 googleapiclient 폴백: 응답 본문 JSON 의 errors[].reason
+        import json
+        data = json.loads(e.content.decode("utf-8"))
+        for err in data.get("error", {}).get("errors", []):
+            if err.get("reason") in _RATE_LIMIT_REASONS:
+                return True
+    except Exception:
+        pass
+    return False
+
+
+def _is_retryable(e: HttpError, status: int) -> bool:
+    """백오프 재시도 대상 HTTP 상태인지 판정 (403 은 rate limit 사유일 때만)."""
+    if status in (429, 500, 502, 503, 504):
+        return True
+    return status == 403 and _is_rate_limit_403(e)
+
 # Google Workspace 네이티브 mime — 동기화 제외
 WORKSPACE_MIMES = frozenset({
     "application/vnd.google-apps.document",
@@ -155,7 +187,7 @@ class DriveClient:
                 return fn()
             except HttpError as e:
                 status = getattr(e.resp, "status", 0)
-                if status in (429, 500, 502, 503, 504) and i < max_retries:
+                if _is_retryable(e, status) and i < max_retries:
                     wait = (2 ** i) + random.random()
                     log.warning(f"HTTP {status} — {wait:.1f}s 후 재시도 ({i+1}/{max_retries})")
                     time.sleep(wait)
@@ -630,7 +662,7 @@ class DriveClient:
                 last_progress = current
             except HttpError as e:
                 status_code = getattr(e.resp, "status", 0)
-                if status_code in (429, 500, 502, 503, 504):
+                if _is_retryable(e, status_code):
                     time.sleep(2 + random.random())
                     continue
                 raise
@@ -731,7 +763,7 @@ class DriveClient:
                         last_progress = current
                     except HttpError as e:
                         status_code = getattr(e.resp, "status", 0)
-                        if status_code in (429, 500, 502, 503, 504):
+                        if _is_retryable(e, status_code):
                             time.sleep(2 + random.random())
                             continue
                         raise

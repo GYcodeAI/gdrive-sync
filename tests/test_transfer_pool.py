@@ -288,3 +288,35 @@ def test_request_stop_before_execution_cancels_all():
     assert called["n"] == 0
     assert all(not r.success for r in results)
     assert all("중단" in (r.error or "") for r in results)
+
+# ──────────────────────────────────────────────────────────
+# 오류 유형 집계 로그 (v2.4.2)
+# ──────────────────────────────────────────────────────────
+
+def test_error_breakdown_logged_on_mass_failure(caplog):
+    import logging
+    from gdrive_sync.transfer_pool import TransferPool, TransferResult
+
+    results = (
+        [TransferResult(rel_path=f"a/{i}.txt", direction="upload",
+                        success=False, error="HttpError 403 rate limit") for i in range(7)]
+        + [TransferResult(rel_path="b.txt", direction="upload",
+                          success=False, error="중단됨")]          # 집계 제외
+        + [TransferResult(rel_path="c.txt", direction="upload", success=True)]
+    )
+    with caplog.at_level(logging.WARNING, logger="gdrive_sync.transfer_pool"):
+        TransferPool._log_error_breakdown(results)
+    assert "오류 유형 집계" in caplog.text
+    assert "7건" in caplog.text
+    assert "403" in caplog.text
+
+
+def test_error_breakdown_quiet_on_few_failures(caplog):
+    import logging
+    from gdrive_sync.transfer_pool import TransferPool, TransferResult
+
+    results = [TransferResult(rel_path="a.txt", direction="upload",
+                              success=False, error="err")] * 3
+    with caplog.at_level(logging.WARNING, logger="gdrive_sync.transfer_pool"):
+        TransferPool._log_error_breakdown(results)
+    assert "오류 유형 집계" not in caplog.text

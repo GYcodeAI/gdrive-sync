@@ -74,6 +74,10 @@ config.py  ─▶ config.yaml + device_overrides + performance/bandwidth/schedul
 - 이동/이름변경 감지 실전 검증 (v2.3 구현 완료 — dry-run 에서 39건 감지 확인, 실제 sync 1회 관찰 필요)
 - 첫 릴리스 태그(v2.4.0) push 후 알림→업데이트 사이클 실전 검증
 - B안: PyInstaller exe 배포 (비개발자용 — HANDOFF 2026-08-11 세션의 "향후 과제" 참조)
+- 원격 진단 수집 (사용자 선택 — HANDOFF 2026-08-13 참조):
+  ② `gdrive-sync diag` 진단 번들(로그+환경+오류집계 zip 바탕화면 생성) →
+  ③ 개발자 Drive 공유폴더로 번들 업로드 버튼 (사용자가 누를 때만) →
+  ④ Sentry 등 자동 에러 리포팅 (사용자 수 늘면)
 
 ---
 

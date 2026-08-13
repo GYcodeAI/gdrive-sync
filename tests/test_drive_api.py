@@ -131,3 +131,61 @@ def test_ensure_upload_metadata_still_empty_after_refetch_keeps_original():
     incomplete = DriveFile(id="f1", name="a.mp3", mime_type="audio/mpeg", md5="", modified_time="")
     out = client._ensure_upload_metadata(incomplete)
     assert out is incomplete
+
+# ──────────────────────────────────────────────────────────
+# 403 rate limit 재시도 판정 (v2.4.2)
+# ──────────────────────────────────────────────────────────
+
+import json
+from unittest.mock import MagicMock
+
+from googleapiclient.errors import HttpError
+
+from gdrive_sync.drive_api import _is_rate_limit_403, _is_retryable
+
+
+def _http_error(status: int, reason: str = "", use_details: bool = False):
+    resp = MagicMock()
+    resp.status = status
+    resp.reason = "Forbidden"
+    body = {"error": {"errors": [{"reason": reason}] if reason else []}}
+    e = HttpError(resp, json.dumps(body).encode("utf-8"))
+    if use_details:
+        # 신버전 googleapiclient 의 error_details 경로
+        e.error_details = [{"reason": reason}] if reason else []
+    return e
+
+
+class TestRateLimit403:
+    def test_user_rate_limit_via_content(self):
+        assert _is_rate_limit_403(_http_error(403, "userRateLimitExceeded"))
+
+    def test_rate_limit_via_error_details(self):
+        assert _is_rate_limit_403(
+            _http_error(403, "rateLimitExceeded", use_details=True))
+
+    def test_permission_403_not_rate_limit(self):
+        assert not _is_rate_limit_403(_http_error(403, "insufficientPermissions"))
+
+    def test_malformed_body_safe(self):
+        resp = MagicMock()
+        resp.status = 403
+        e = HttpError(resp, b"not json at all")
+        assert not _is_rate_limit_403(e)
+
+
+class TestIsRetryable:
+    def test_429_and_5xx_retryable(self):
+        for status in (429, 500, 502, 503, 504):
+            assert _is_retryable(_http_error(status), status)
+
+    def test_403_rate_limit_retryable(self):
+        e = _http_error(403, "userRateLimitExceeded")
+        assert _is_retryable(e, 403)
+
+    def test_403_permission_not_retryable(self):
+        e = _http_error(403, "insufficientPermissions")
+        assert not _is_retryable(e, 403)
+
+    def test_404_not_retryable(self):
+        assert not _is_retryable(_http_error(404), 404)

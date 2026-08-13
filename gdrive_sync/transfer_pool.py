@@ -187,7 +187,10 @@ class TransferPool:
                 arrow = "↑" if task.direction == "upload" else "↓"
                 if not result.success and result.error != "중단됨" and not result.vanished:
                     name = task.rel_path.rsplit("/", 1)[-1] if "/" in task.rel_path else task.rel_path
-                    log.warning(f"[{completed}/{total}] {arrow} 실패: {name}")
+                    # 오류 원문을 함께 남겨야 사후 진단 가능 (2026-08-13: 사유 없는
+                    # '실패: 파일명' 19,180건으로 원인 추적 불가했던 사례)
+                    reason = " ".join((result.error or "원인 미상").split())[:160]
+                    log.warning(f"[{completed}/{total}] {arrow} 실패: {name} — {reason}")
                 elif result.vanished:
                     # AV/DLP/Office 임시파일이 스캔 후 사라진 케이스 — 요약에만 카운트, 화면 로그는 조용히
                     name = task.rel_path.rsplit("/", 1)[-1] if "/" in task.rel_path else task.rel_path
@@ -247,7 +250,23 @@ class TransferPool:
                     error=str(e),
                 ))
 
+        self._log_error_breakdown(results)
         return results
+
+    @staticmethod
+    def _log_error_breakdown(results: list) -> None:
+        """실패 다발 시 오류 유형별 상위 3개 집계를 로그로 — 원인 파악용."""
+        errors = [
+            " ".join((r.error or "원인 미상").split())[:100]
+            for r in results
+            if not r.success and r.error != "중단됨" and not r.vanished
+        ]
+        if len(errors) < 5:      # 소수 실패는 개별 실패 로그로 충분
+            return
+        from collections import Counter
+        top = Counter(errors).most_common(3)
+        lines = [f"  {cnt}건 — {msg}" for msg, cnt in top]
+        log.warning("오류 유형 집계 (상위 3):\n" + "\n".join(lines))
 
     def is_stop_requested(self) -> bool:
         """중단이 요청됐는지 확인 (업로드/다운로드 루프에서 호출)."""
