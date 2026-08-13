@@ -32,6 +32,15 @@ _TEMP_NAME_ALLOWLIST = frozenset({
     "README", "LICENSE", "NOTICE", "INDEX", "CHANGES",
 })
 
+# 드라이브 루트(D:\ 등)를 통째로 동기화할 때 딸려오는 Windows 시스템 항목 —
+# 어떤 경우에도 동기화 대상이 아니므로 하드코딩 제외 (2026-08-13, v2.4.3).
+# $RECYCLE.BIN 은 내용이 접근거부라도 폴더 껍데기가 Drive 에 생성되던 문제.
+_SYSTEM_NAME_SKIP = frozenset({
+    "$RECYCLE.BIN", "$Recycle.Bin", "System Volume Information",
+    "$WinREAgent", "Config.Msi", "Recovery", "PerfLogs",
+    "pagefile.sys", "hiberfil.sys", "swapfile.sys", "DumpStack.log.tmp",
+})
+
 from gdrive_sync.utils import (
     matches_any, md5_file, mtime_to_iso, to_long_path,
 )
@@ -143,6 +152,8 @@ class LocalScanner:
                 rel = f"{rel_prefix}/{name}" if rel_prefix else name
 
                 # 빠른 제외 (하드코딩)
+                if name in _SYSTEM_NAME_SKIP:
+                    continue
                 if name.startswith(".gdrive_sync_"):
                     continue
                 if name.endswith(".gdrsync.part"):

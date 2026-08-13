@@ -151,3 +151,23 @@ def test_office_lock_prefix_filter(tmp_path: Path):
         assert name.startswith("~$") or name.startswith(".~lock."), f"{name} 필터에 걸려야 함"
     for name in normal_names:
         assert not (name.startswith("~$") or name.startswith(".~lock.")), f"{name} 보존되어야 함"
+
+
+def test_windows_system_entries_skipped(tmp_path):
+    """드라이브 루트 동기화 시 시스템 폴더/파일은 하드코딩 제외 (v2.4.3)."""
+    (tmp_path / "$RECYCLE.BIN" / "S-1-5-21").mkdir(parents=True)
+    (tmp_path / "$RECYCLE.BIN" / "S-1-5-21" / "deleted.txt").write_bytes(b"x")
+    (tmp_path / "System Volume Information").mkdir()
+    (tmp_path / "pagefile.sys").write_bytes(b"x")
+    (tmp_path / "정상폴더").mkdir()
+    (tmp_path / "정상폴더" / "문서.hwp").write_bytes(b"data")
+    (tmp_path / "루트파일.txt").write_bytes(b"data")
+
+    scanner = LocalScanner(tmp_path, exclude_patterns=[])
+    rels = set(scanner.scan().keys())
+
+    assert "정상폴더/문서.hwp" in rels
+    assert "루트파일.txt" in rels
+    assert not any("$RECYCLE.BIN" in r for r in rels)
+    assert not any("System Volume Information" in r for r in rels)
+    assert "pagefile.sys" not in rels
