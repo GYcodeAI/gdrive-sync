@@ -174,6 +174,24 @@ def check_for_update(force: bool = False, timeout: float = 5.0) -> Optional[Upda
     return UpdateInfo(current=__version__, latest=latest)
 
 
+def source_clone_root(package_dir: Optional[Path] = None) -> Optional[Path]:
+    """패키지가 git 소스 클론(개발/editable 환경)에서 로드 중이면 클론 루트 반환.
+
+    클론 실행에서는 pip 업그레이드가 설치돼도 sys.path 상 클론 소스가 우선이라
+    적용되지 않는다 (맥북 launch-gui.command 의 `cd 클론 && python -m` 이 대표 사례
+    — 2026-08-31 업데이트 무한반복 소동). 이 경우 안내를 git pull 로 바꿔야 한다.
+    pip 설치본(site-packages)이면 None.
+    """
+    try:
+        pkg = package_dir or Path(__file__).resolve().parent
+        root = pkg.parent
+        if (root / ".git").exists():
+            return root
+    except Exception:
+        pass
+    return None
+
+
 def run_pip_upgrade(quiet: bool = False) -> tuple:
     """현재 파이썬 환경에 pip 업그레이드 실행. 반환: (종료코드, 출력).
 

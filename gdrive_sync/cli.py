@@ -1352,6 +1352,17 @@ def update(ctx, check_only: bool, yes: bool):
         click.echo(f"설치하려면: gdrive-sync update  (또는 {info.upgrade_command()})")
         return
 
+    from gdrive_sync.update_check import source_clone_root
+    clone = source_clone_root()
+    if clone is not None:
+        click.secho(
+            f"이 프로그램은 개발 소스 클론에서 실행 중입니다: {clone}\n"
+            f"이 환경에서는 pip 업데이트가 적용되지 않습니다 (클론 소스가 우선 로드됨).\n"
+            f"대신 해당 폴더에서 'git pull' 로 갱신하세요.",
+            fg="yellow",
+        )
+        sys.exit(1)
+
     if not yes and not click.confirm("지금 업데이트할까요?", default=True):
         return
 

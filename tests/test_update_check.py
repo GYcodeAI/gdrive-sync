@@ -130,3 +130,29 @@ class TestCheckForUpdate:
         monkeypatch.setattr(uc, "fetch_latest_version", lambda timeout: "v9.9.9")
         info = check_for_update()
         assert info.latest == "v9.9.9"
+
+
+# ──────────────────────────────────────────────────────────
+# source_clone_root — 클론 실행 감지 (v2.4.6)
+# ──────────────────────────────────────────────────────────
+
+from pathlib import Path
+
+from gdrive_sync.update_check import source_clone_root
+
+
+class TestSourceCloneRoot:
+    def test_detects_git_clone(self, tmp_path):
+        (tmp_path / ".git").mkdir()
+        pkg = tmp_path / "gdrive_sync"
+        pkg.mkdir()
+        assert source_clone_root(pkg) == tmp_path
+
+    def test_none_for_site_packages_layout(self, tmp_path):
+        pkg = tmp_path / "site-packages" / "gdrive_sync"
+        pkg.mkdir(parents=True)
+        assert source_clone_root(pkg) is None
+
+    def test_real_dev_checkout_is_detected(self):
+        # 이 테스트 자체가 개발 클론에서 도니 실제 경로로도 감지돼야 함
+        assert source_clone_root() is not None

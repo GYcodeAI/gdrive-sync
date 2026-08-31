@@ -2506,6 +2506,22 @@ class SyncApp:
             self._run_upgrade_async(info)
 
     def _run_upgrade_async(self, info) -> None:
+        # 소스 클론 실행 환경이면 pip 업데이트가 적용되지 않음 — git pull 안내
+        try:
+            from gdrive_sync.update_check import source_clone_root
+            clone = source_clone_root()
+        except Exception:
+            clone = None
+        if clone is not None:
+            self.log_queue.put(("log", "WARNING",
+                f"이 프로그램은 개발 소스 클론에서 실행 중 — pip 대신 git pull 필요: {clone}"))
+            messagebox.showinfo(
+                "업데이트 — 수동 갱신 필요",
+                "이 프로그램은 개발 소스 폴더에서 직접 실행되고 있어\n"
+                "자동(pip) 업데이트가 적용되지 않습니다.\n\n"
+                f"아래 폴더에서 git pull 을 실행한 뒤 프로그램을 재시작하세요:\n{clone}",
+            )
+            return
         self.log_queue.put(("log", "INFO", f"⬇ v{info.latest} 업데이트 설치 중... (pip)"))
 
         def worker():
