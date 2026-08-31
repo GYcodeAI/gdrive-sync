@@ -123,3 +123,37 @@ def test_files_done_monotone():
     snap = tracker.snapshot()
     assert snap.files_done == 5
     assert snap.bytes_done == 500
+
+
+def test_transfer_phase_flags():
+    """on_transfer_start/end 가 transfer_active·remaining_bytes 를 스냅샷에 반영."""
+    pairs = [SyncPair(local_path=Path("/p"), remote_path="P")]
+    cfg = _make_cfg(pairs)
+    with patch("gdrive_sync.progress.load_state", return_value=_empty_state()):
+        tracker = ProgressTracker(cfg)
+
+    # 기본: 전송 단계 아님
+    snap = tracker.snapshot()
+    assert snap.transfer_active is False
+    assert snap.transfer_remaining_bytes == 0
+
+    # 배치 시작 — 남은 바이트 = pending
+    tracker.bytes_done = 5_000          # 이전 폴더에서 이미 옮긴 양
+    tracker.on_transfer_start(pending_bytes=10_000)
+    snap = tracker.snapshot()
+    assert snap.transfer_active is True
+    assert snap.transfer_remaining_bytes == 10_000
+
+    # 청크 진척 — 남은 양 감소 (배치 시작 이후 증분만 계산)
+    tracker.bytes_done += 4_000
+    assert tracker.snapshot().transfer_remaining_bytes == 6_000
+
+    # 초과 진척(추정 오차) 시 0 으로 클램프
+    tracker.bytes_done += 20_000
+    assert tracker.snapshot().transfer_remaining_bytes == 0
+
+    # 배치 종료 — 플래그 해제
+    tracker.on_transfer_end()
+    snap = tracker.snapshot()
+    assert snap.transfer_active is False
+    assert snap.transfer_remaining_bytes == 0

@@ -66,7 +66,9 @@ def _setup_logging(cfg: Optional[Config] = None, verbose: bool = False) -> None:
     logging.basicConfig(
         level=level,
         format="%(asctime)s [%(levelname)s] %(message)s",
-        datefmt="%H:%M:%S",
+        # 날짜 포함 — 로그 파일이 여러 날에 걸치면 시각만으론 세션 경계를
+        # 구분할 수 없었음 (2026-08-31 사후분석 때 확인)
+        datefmt="%m-%d %H:%M:%S",
         handlers=handlers,
         force=True,
     )

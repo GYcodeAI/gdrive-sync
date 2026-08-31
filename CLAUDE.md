@@ -40,6 +40,8 @@ config.py  ─▶ config.yaml + device_overrides + performance/bandwidth/schedul
 - v2.2: GUI 5대 기능 (토스트 알림, 개별 폴더 동기화, 대역폭 편집기, 스케줄러 GUI, 히스토리 패널)
 - v2.3: 이동/이름변경 감지 (delete+new → move 변환, 재전송 생략) + Drive 빈 폴더 자동 정리 (198 tests)
 - v2.4: 배포/자동 업데이트 — pip+GitHub 태그 기반 (227 tests)
+- v2.4.1~2.4.4: 바탕화면 바로가기 / 403 rate limit 백오프 / Windows 시스템 항목 제외 /
+  트리클 워치독 오탐 수정(전송 단계에서만 평가) (248 tests)
 
 ## 주요 구현 사항
 - **병렬 전송** (`transfer_pool.py`): ThreadPoolExecutor, 스레드별 DriveClient, 공유 path_cache (Lock)

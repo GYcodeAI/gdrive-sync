@@ -1184,8 +1184,27 @@ class SyncEngine:
             f"(동시 {self.cfg.performance.parallel_transfers}개)"
         )
 
-        upload_results = pool.execute_uploads(pair, upload_tasks)
-        download_results = pool.execute_downloads(pair, download_tasks)
+        # ProgressTracker 에 "전송 단계 진입/이탈" 표시 — GUI 트리클 워치독은 이 구간
+        # 에서만 바이트 정체를 평가한다 (스캔·분석 단계의 무전송을 정체로 오인 방지).
+        if tracker:
+            try:
+                pending = sum(
+                    (t.local.size or 0) for t in upload_tasks if t.local is not None
+                ) + sum(
+                    (t.remote.size or 0) for t in download_tasks if t.remote is not None
+                )
+                tracker.on_transfer_start(pending)
+            except Exception:
+                pass
+        try:
+            upload_results = pool.execute_uploads(pair, upload_tasks)
+            download_results = pool.execute_downloads(pair, download_tasks)
+        finally:
+            if tracker:
+                try:
+                    tracker.on_transfer_end()
+                except Exception:
+                    pass
 
         # ── 5) 결과를 state/summary에 반영 (메인 스레드 독점)
         self._apply_results(upload_results + download_results, state, summary)

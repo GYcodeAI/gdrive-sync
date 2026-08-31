@@ -25,6 +25,7 @@ import subprocess
 import sys
 import threading
 import time
+import traceback
 import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
@@ -206,6 +207,7 @@ class SyncApp:
     # 큰 파일 한 개 중간에 멈춰도 베이스라인이 안 움직여 빠르게 감지됨.
     BYTES_STALL_THRESHOLD_SEC = 120            # 2분
     BYTES_STALL_MIN_DELTA = 512 * 1024         # 512 KB
+    WATCHDOG_POLL_MS = 5000                    # 워치독 독립 루프 주기 (5초)
 
     # 창 상태 저장 파일
     _GUI_STATE_PATH = Path.home() / ".gdrive_sync" / "gui_state.json"
@@ -288,8 +290,13 @@ class SyncApp:
         self._update_check_running = False
         self.root.after(3000, lambda: self._start_update_check(manual=False))
 
-        # 백그라운드 루프 시작
+        # Tk 콜백(after/이벤트 핸들러) 예외를 파일 로그로 — pythonw 실행에선
+        # stderr 가 버려져 콜백 예외가 완전 무음이었다 (2026-08-27 사고의 은폐 요인)
+        self.root.report_callback_exception = self._on_tk_callback_exception
+
+        # 백그라운드 루프 시작 (폴링·워치독은 서로 독립 — 하나가 죽어도 다른 쪽 생존)
         self.root.after(self.QUEUE_POLL_MS, self._poll_queue)
+        self.root.after(self.WATCHDOG_POLL_MS, self._watchdog_loop)
         self.root.after(200, self._refresh_status)
 
         # (A) 가시성 안전망: deiconify 가 어떤 이유로든 실패해 창이 영구히
@@ -2528,6 +2535,20 @@ class SyncApp:
     _MAX_POLL_BATCH = 100       # 한 번의 poll 사이클에서 처리할 최대 메시지 수
 
     def _poll_queue(self) -> None:
+        """메시지 폴링 루프 — 어떤 예외에도 다음 폴링을 반드시 재예약.
+
+        2026-08-27 사고: 본문 처리 중 예외 1회로 after 재예약이 끊겨 로그창·
+        진행률·워치독이 87시간 동결 (pythonw 라 예외도 안 보임). 본문은
+        _poll_queue_once 로 분리하고 여기서는 생존만 보장한다.
+        """
+        try:
+            self._poll_queue_once()
+        except Exception:
+            log.exception("메시지 폴링 처리 오류 — 이번 배치는 버리고 루프는 계속")
+        finally:
+            self.root.after(self.QUEUE_POLL_MS, self._poll_queue)
+
+    def _poll_queue_once(self) -> None:
         """워커 스레드가 큐에 넣은 메시지를 UI에 반영.
 
         메시지 타입:
@@ -2608,25 +2629,33 @@ class SyncApp:
         except Exception:
             pass
 
-        # ── 무진행 워치독 ──
-        # "동기화 완료 후 PC 종료"가 켜진 상태에서만 발동.
-        # 워커 큐가 NO_PROGRESS_THRESHOLD_SEC 동안 한 줄도 안 보내면
-        # 워커가 정지한 것으로 간주 → 강제 종료 + shutdown 직접 트리거.
-        self._check_no_progress_watchdog()
+        # (무진행 워치독은 v2.4.5부터 _watchdog_loop 독립 타이머에서 평가 —
+        #  이 폴링 루프가 죽어도 워치독은 살아있어야 하므로 여기서 안 부른다)
 
-        self.root.after(self.QUEUE_POLL_MS, self._poll_queue)
+    def _watchdog_loop(self) -> None:
+        """무진행 워치독 독립 루프 — 폴링 루프와 분리된 생존 보장 타이머.
+
+        (A) 큐 침묵 NO_PROGRESS_THRESHOLD_SEC / (B) 전송 단계 바이트 트리클
+        → 워커 강제 종료. PC 종료는 옵션이 켜진 경우에만 _watchdog_finalize 에서.
+        """
+        try:
+            self._check_no_progress_watchdog()
+        except Exception:
+            log.exception("워치독 평가 오류 — 루프는 계속")
+        finally:
+            self.root.after(self.WATCHDOG_POLL_MS, self._watchdog_loop)
 
     def _check_no_progress_watchdog(self) -> None:
-        """무진행 워치독 평가. _poll_queue에서 매 사이클 호출."""
+        """무진행 워치독 평가. _watchdog_loop에서 주기 호출."""
         if self._watchdog_triggered:
             return
         if self._last_activity_ts is None:
             return
-        # busy 상태인지 — sync 버튼이 disabled면 작업 진행 중
-        try:
-            if str(self.sync_btn.cget("state")) != "disabled":
-                return
-        except Exception:
+        # 작업 진행 중인지 — 버튼 상태 대신 워커 스레드 생존으로 판정
+        # (2026-08-27 사고 검토: UI 상태에 의존하면 UI 가 꼬였을 때 워치독까지
+        #  꺼진다. 감시 대상은 워커이므로 워커 기준으로 게이트)
+        worker = self.worker_thread
+        if worker is None or not worker.is_alive():
             return
 
         now = time.monotonic()
@@ -2659,6 +2688,10 @@ class SyncApp:
             f"워커를 강제 종료하고 {followup}",
             "ERROR",
         )
+        log.error(f"무진행 워치독 발동 — {reason}")
+        # 블랙박스: 발동 시점의 전 스레드 스택을 파일 로그에 남김 —
+        # "무로그 정지"의 정확한 지점을 사후에 특정하기 위함 (2026-08-27 사고)
+        self._dump_thread_stacks(reason)
         engine = self.current_engine
         if engine is not None:
             try:
@@ -2668,12 +2701,40 @@ class SyncApp:
         # 워커가 done 안 보내도 진행 — 5초 후 sync 완료 핸들러 직접 호출
         self.root.after(5000, self._watchdog_finalize)
 
+    def _dump_thread_stacks(self, reason: str) -> None:
+        """전 스레드의 현재 스택을 파일 로그에 덤프 (워치독 발동 시 블랙박스)."""
+        try:
+            frames = sys._current_frames()
+            lines = [f"=== 스레드 스택 덤프 (워치독: {reason}) ==="]
+            for t in threading.enumerate():
+                lines.append(f"--- {t.name} (daemon={t.daemon}, alive={t.is_alive()}) ---")
+                frame = frames.get(t.ident)
+                if frame is not None:
+                    lines.append("".join(traceback.format_stack(frame)).rstrip())
+                else:
+                    lines.append("  (프레임 없음)")
+            log.error("\n".join(lines))
+        except Exception as e:
+            log.warning(f"스레드 스택 덤프 실패 (무시): {e}")
+
+    def _on_tk_callback_exception(self, exc_type, exc_value, exc_tb) -> None:
+        """Tk after/이벤트 콜백에서 새어나온 예외를 파일 로그에 기록."""
+        try:
+            log.error("Tk 콜백 예외", exc_info=(exc_type, exc_value, exc_tb))
+        except Exception:
+            pass
+
     def _check_bytes_stall(self, now: float) -> Optional[str]:
         """바이트-진척 워치독 평가. 정체 시 사유 문자열 반환, 아니면 None.
 
+        - TransferPool 이 실제 전송 중(snap.transfer_active)일 때만 평가.
+          스캔·분석·폴더생성·상태저장 단계는 바이트가 안 움직이는 게 정상이므로
+          베이스라인을 비우고 미발동 (v2.4.3 오탐: 앞 폴더에서 바이트가 한 번
+          발생한 뒤 대형 폴더 스캔 2분 → "트리클"로 강제 중단됐던 사례).
+        - 현재 배치의 남은 바이트가 임계량 미만이면 미발동 — 512KB 도 안 남은
+          배치는 느려도 "트리클"과 구분이 안 되므로 (재시도 백오프 등) 기다린다.
         - bytes_done 이 BYTES_STALL_MIN_DELTA 이상 진척하면 베이스라인 리셋
         - 그 외엔 베이스라인 이후 경과시간이 임계 초과 시 발동
-        - bytes_done == 0 이면(전송 시작 전: 스캔/폴더생성 단계) 미발동
         """
         tracker = getattr(self, "_progress_tracker", None)
         if tracker is None:
@@ -2682,10 +2743,19 @@ class SyncApp:
             snap = tracker.snapshot()
         except Exception:
             return None
-        bytes_now = int(getattr(snap, "bytes_done", 0) or 0)
-        if bytes_now <= 0:
-            # 아직 파일 전송 단계 아님 — 베이스라인 미설정 상태 유지
+        if not bool(getattr(snap, "transfer_active", False)):
+            # 전송 단계 아님(스캔/분석/폴더생성/상태저장) — 베이스라인 비움.
+            # 다음 전송 배치가 시작되면 그 시점부터 새로 잰다.
+            self._bytes_baseline_ts = None
+            self._bytes_baseline = 0
             return None
+        remaining = int(getattr(snap, "transfer_remaining_bytes", 0) or 0)
+        if remaining < self.BYTES_STALL_MIN_DELTA:
+            # 남은 양이 임계 미만 — 진척 512KB 를 채울 수 없으니 판정 불가
+            self._bytes_baseline_ts = None
+            self._bytes_baseline = 0
+            return None
+        bytes_now = int(getattr(snap, "bytes_done", 0) or 0)
         if self._bytes_baseline_ts is None:
             self._bytes_baseline = bytes_now
             self._bytes_baseline_ts = now
@@ -2862,19 +2932,28 @@ class SyncApp:
     def _log_batch(self, entries: list[tuple[str, str]]) -> None:
         """여러 로그 메시지를 한 번의 위젯 조작으로 삽입."""
         self.log_text.config(state="normal")
+        try:
+            for level, msg in entries:
+                try:
+                    self.log_text.insert("end", msg + "\n", level)
+                except tk.TclError:
+                    # 구버전 Tk 는 BMP 밖 문자(U+10000+, 일부 이모지) 삽입에서
+                    # TclError — 해당 문자만 치환해 재시도 (한 줄 때문에 배치·
+                    # 폴링이 죽으면 안 됨)
+                    safe = "".join(c if ord(c) <= 0xFFFF else "□" for c in msg)
+                    self.log_text.insert("end", safe + "\n", level)
 
-        for level, msg in entries:
-            self.log_text.insert("end", msg + "\n", level)
+            # 줄 수 제한 (오래된 줄 삭제)
+            total_lines = int(self.log_text.index("end-1c").split(".")[0])
+            if total_lines > self._MAX_LOG_LINES:
+                excess = total_lines - self._MAX_LOG_LINES
+                self.log_text.delete("1.0", f"{excess + 1}.0")
 
-        # 줄 수 제한 (오래된 줄 삭제)
-        total_lines = int(self.log_text.index("end-1c").split(".")[0])
-        if total_lines > self._MAX_LOG_LINES:
-            excess = total_lines - self._MAX_LOG_LINES
-            self.log_text.delete("1.0", f"{excess + 1}.0")
-
-        # 스크롤은 배치당 1회만
-        self.log_text.see("end")
-        self.log_text.config(state="disabled")
+            # 스크롤은 배치당 1회만
+            self.log_text.see("end")
+        finally:
+            # 예외가 나도 위젯을 편집불가 상태로 복원
+            self.log_text.config(state="disabled")
 
     def _log(self, msg: str, level: str = "INFO") -> None:
         """단일 메시지 삽입 (배치 밖에서 직접 호출용)."""

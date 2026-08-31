@@ -44,6 +44,14 @@ class ProgressSnapshot:
     # 라벨
     label: str = "[추정]"          # "[추정]" / "[추정 부분 확정]" / "[확정]"
 
+    # 전송 단계 여부 (트리클 워치독용)
+    # transfer_active: TransferPool 이 실제 업/다운로드를 실행 중인 구간만 True.
+    #   스캔·분석·폴더 생성·상태 저장 단계는 False — 이 구간에서 바이트가 안 움직이는
+    #   것은 정상이므로 워치독이 정체로 오인하면 안 됨.
+    # transfer_remaining_bytes: 현재 전송 배치에서 아직 안 옮긴 바이트 (추정).
+    transfer_active: bool = False
+    transfer_remaining_bytes: int = 0
+
     @property
     def overall_ratio(self) -> float:
         """전체 진행률 (0.0~1.0). 폴더 수 기반 + 현재 폴더 미세조정."""
@@ -116,9 +124,34 @@ class ProgressTracker:
         self._current_pair_files_done = 0
         self._current_pair_files_total = 0
 
+        # 전송 단계 추적 (트리클 워치독용)
+        self.transfer_active: bool = False
+        self._transfer_pending_bytes: int = 0      # 배치 시작 시 옮길 총 바이트
+        self._transfer_bytes_at_start: int = 0     # 배치 시작 시점의 bytes_done
+
     # ──────────────────────────────────────────────
     # 이벤트 입력
     # ──────────────────────────────────────────────
+
+    def on_transfer_start(self, pending_bytes: int = 0) -> None:
+        """TransferPool 배치 실행 직전 호출 — 전송 단계 진입."""
+        self.transfer_active = True
+        self._transfer_pending_bytes = max(0, int(pending_bytes or 0))
+        self._transfer_bytes_at_start = self.bytes_done
+
+    def on_transfer_end(self) -> None:
+        """TransferPool 배치 종료(정상/예외 무관) 시 호출 — 전송 단계 이탈."""
+        self.transfer_active = False
+        self._transfer_pending_bytes = 0
+        self._transfer_bytes_at_start = self.bytes_done
+
+    @property
+    def transfer_remaining_bytes(self) -> int:
+        """현재 배치에서 아직 옮기지 않은 바이트 (추정, 0 이상)."""
+        if not self.transfer_active:
+            return 0
+        moved = max(0, self.bytes_done - self._transfer_bytes_at_start)
+        return max(0, self._transfer_pending_bytes - moved)
 
     def on_pair_start(self, pair: SyncPair) -> None:
         self.current_pair = pair
@@ -220,4 +253,6 @@ class ProgressTracker:
             bytes_done=self.bytes_done,
             bytes_total=max(self.bytes_done, bytes_total),
             label=self._label(),
+            transfer_active=self.transfer_active,
+            transfer_remaining_bytes=self.transfer_remaining_bytes,
         )
