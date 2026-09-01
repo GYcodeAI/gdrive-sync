@@ -42,6 +42,9 @@ config.py  ─▶ config.yaml + device_overrides + performance/bandwidth/schedul
 - v2.4: 배포/자동 업데이트 — pip+GitHub 태그 기반 (227 tests)
 - v2.4.1~2.4.4: 바탕화면 바로가기 / 403 rate limit 백오프 / Windows 시스템 항목 제외 /
   트리클 워치독 오탐 수정(전송 단계에서만 평가) (248 tests)
+- v2.4.7: **NFD 중복 오판 삭제 사고 수정** — APFS·HFS+(정규화 무시 FS)에서 NFD 이름 새 파일을
+  자기 자신과 비교해 '중복'으로 삭제하던 버그. resolve() 문자열 비교 → `os.path.samefile`(inode) 판정
+  (`normalize.py`의 `_same_entry`). 265 tests
 
 ## 주요 구현 사항
 - **병렬 전송** (`transfer_pool.py`): ThreadPoolExecutor, 스레드별 DriveClient, 공유 path_cache (Lock)

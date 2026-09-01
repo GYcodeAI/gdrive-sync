@@ -50,6 +50,21 @@ def _md5(path: Path, chunk: int = 1024 * 1024) -> str:
     return h.hexdigest()
 
 
+def _same_entry(src: Path, dst: Path) -> bool:
+    """src 와 dst 가 디스크상 같은 디렉토리 항목인지 (inode 비교).
+
+    APFS·HFS+ 는 정규화 무시(normalization-insensitive)라 NFD 이름 파일
+    하나만 있어도 NFC 경로 조회(dst.exists())가 같은 파일에 닿는다.
+    resolve() 문자열 비교는 NFD/NFC 형태를 그대로 유지해 같은 파일을
+    별개 파일로 오판한다 — 그 상태에서 md5 비교(자기 자신과 비교라 항상
+    동일)를 통과해 유일한 사본을 삭제하는 사고가 v2.4.6 에서 발생.
+    """
+    try:
+        return os.path.samefile(to_long_path(src), to_long_path(dst))
+    except OSError:
+        return False
+
+
 def normalize_path(
     root: Path,
     dry_run: bool = False,
@@ -84,7 +99,7 @@ def normalize_path(
             src = cur_path / fname
             dst = cur_path / new_name
             try:
-                if dst.exists() and src.resolve() != dst.resolve():
+                if dst.exists() and not _same_entry(src, dst):
                     # NFC 파일이 이미 별도 존재 — 내용 비교로 진짜 중복인지 판별
                     try:
                         same = (src.stat().st_size == dst.stat().st_size
@@ -133,7 +148,7 @@ def normalize_path(
             src = cur_path / dname
             dst = cur_path / new_name
             try:
-                if dst.exists() and src.resolve() != dst.resolve():
+                if dst.exists() and not _same_entry(src, dst):
                     # 디렉토리는 내용 비교 없이 항상 충돌 경고 (안전 우선)
                     rep.skipped_conflict += 1
                     rep.conflicts.append(src)
