@@ -1627,43 +1627,51 @@ class SyncEngine:
             return
         permanent = (policy == "permanent")
 
-        kept: set[str] = set()
-        removed: set[str] = set()
-        # 깊은 경로부터 — 자식 폴더가 먼저 비워져야 부모도 빈 것으로 판정됨
-        for rel in sorted(self._remote_prune_rels, key=lambda r: -r.count("/")):
+        # 후보 + 모든 상위를 모아 깊은 경로부터 한 번씩 검사.
+        # 후보마다 곧바로 위로 올라가면, 형제 폴더(예: v06/Preview 다음 v06/Contents)가
+        # 아직 안 지워진 시점에 부모를 '자식 있음'으로 확정해 버려 부모가 껍데기로 남음.
+        candidates: set[str] = set()
+        for rel in self._remote_prune_rels:
             cur = rel
             while cur:
-                if self.is_force_stop_requested():
-                    return
-                if cur in kept:
-                    break
-                if cur in removed:
-                    cur = cur.rsplit("/", 1)[0] if "/" in cur else ""
-                    continue
-                full = f"{pair.remote_path}/{cur}" if pair.remote_path else cur
-                try:
-                    fid = self.drive.resolve_folder_path(full, create_missing=False)
-                except FileNotFoundError:
-                    # 이미 사라진 폴더 — 부모는 계속 검사
-                    removed.add(cur)
-                    cur = cur.rsplit("/", 1)[0] if "/" in cur else ""
-                    continue
-                except Exception as e:
-                    log.warning(f"Drive 폴더 조회 실패(정리 스킵) {full}: {e}")
-                    break
-                try:
-                    if self.drive.folder_has_children(fid):
-                        kept.add(cur)
-                        break
-                    self.drive.delete_file(fid, permanent=permanent)
-                except Exception as e:
-                    log.warning(f"Drive 빈 폴더 정리 실패 {full}: {e}")
-                    break
-                self.drive.invalidate_cached_path(full)
-                removed.add(cur)
-                summary.pruned_remote_dirs += 1
-                log.info(f"🗑 Drive 빈 폴더 제거: {cur}")
+                candidates.add(cur)
                 cur = cur.rsplit("/", 1)[0] if "/" in cur else ""
+
+        kept: set[str] = set()
+        for cur in sorted(candidates, key=lambda r: (-r.count("/"), r)):
+            if self.is_force_stop_requested():
+                return
+            parent = cur.rsplit("/", 1)[0] if "/" in cur else ""
+            if cur in kept:
+                # 자식이 남아 있으니 부모도 비어 있을 수 없음 — API 호출 생략
+                if parent:
+                    kept.add(parent)
+                continue
+            full = f"{pair.remote_path}/{cur}" if pair.remote_path else cur
+            try:
+                fid = self.drive.resolve_folder_path(full, create_missing=False)
+            except FileNotFoundError:
+                # 이미 사라진 폴더 — 부모는 계속 검사
+                continue
+            except Exception as e:
+                log.warning(f"Drive 폴더 조회 실패(정리 스킵) {full}: {e}")
+                if parent:
+                    kept.add(parent)
+                continue
+            try:
+                if self.drive.folder_has_children(fid):
+                    if parent:
+                        kept.add(parent)
+                    continue
+                self.drive.delete_file(fid, permanent=permanent)
+            except Exception as e:
+                log.warning(f"Drive 빈 폴더 정리 실패 {full}: {e}")
+                if parent:
+                    kept.add(parent)
+                continue
+            self.drive.invalidate_cached_path(full)
+            summary.pruned_remote_dirs += 1
+            log.info(f"🗑 Drive 빈 폴더 제거: {cur}")
         self._remote_prune_rels = set()
 
     def _do_keep_both(self, pair, action, remote_root_id, state, summary):

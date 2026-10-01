@@ -45,6 +45,9 @@ config.py  ─▶ config.yaml + device_overrides + performance/bandwidth/schedul
 - v2.4.7: **NFD 중복 오판 삭제 사고 수정** — APFS·HFS+(정규화 무시 FS)에서 NFD 이름 새 파일을
   자기 자신과 비교해 '중복'으로 삭제하던 버그. resolve() 문자열 비교 → `os.path.samefile`(inode) 판정
   (`normalize.py`의 `_same_entry`). 265 tests
+- v2.4.8: **Drive 빈 폴더 껍데기 잔존 수정** — `_prune_empty_remote_dirs` 가 형제 빈 폴더 삭제 전에
+  부모를 '자식 있음'으로 확정해 `_build/v06` 등 상위가 남던 버그. 후보+상위를 모아 깊은 순 1회 검사로 변경.
+  `clean-empty-folders` dry-run 이 부모 폴더를 누락하던 문제도 수정. 266 tests
 
 ## 주요 구현 사항
 - **병렬 전송** (`transfer_pool.py`): ThreadPoolExecutor, 스레드별 DriveClient, 공유 path_cache (Lock)

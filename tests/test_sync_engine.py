@@ -808,6 +808,40 @@ def test_prune_remote_dirs_stops_at_nonempty():
     assert summary.pruned_remote_dirs == 0
 
 
+def test_prune_remote_dirs_sibling_leaves_then_parent():
+    """형제 빈 폴더가 모두 지워지면 공통 부모도 정리 (부모를 '자식 있음'으로 조기 확정하지 않음).
+
+    실사고: _build/v06/{Preview,Contents,META-INF} 만 지워지고 _build/v06, _build 가 남음.
+    """
+    engine, drive, pair, summary = _prune_engine()
+    drive.resolve_folder_path.side_effect = lambda p, create_missing: f"id:{p}"
+    alive = {
+        "업무/_build": {"업무/_build/v06"},
+        "업무/_build/v06": {"업무/_build/v06/Preview", "업무/_build/v06/Contents"},
+        "업무/_build/v06/Preview": set(),
+        "업무/_build/v06/Contents": set(),
+    }
+
+    def _has_children(fid):
+        return bool(alive[fid[3:]])
+
+    def _delete(fid, permanent):
+        path = fid[3:]
+        parent = path.rsplit("/", 1)[0]
+        alive.get(parent, set()).discard(path)
+
+    drive.folder_has_children.side_effect = _has_children
+    drive.delete_file.side_effect = _delete
+    engine._remote_prune_rels = {"_build/v06/Preview", "_build/v06/Contents"}
+
+    engine._prune_empty_remote_dirs(pair, summary)
+
+    deleted = [c.args[0] for c in drive.delete_file.call_args_list]
+    assert set(deleted[:2]) == {"id:업무/_build/v06/Preview", "id:업무/_build/v06/Contents"}
+    assert deleted[2:] == ["id:업무/_build/v06", "id:업무/_build"]
+    assert summary.pruned_remote_dirs == 4
+
+
 def test_prune_remote_dirs_respects_skip_policy():
     """delete_policy=skip 이면 Drive 폴더도 정리하지 않음."""
     engine, drive, pair, summary = _prune_engine(policy="skip")

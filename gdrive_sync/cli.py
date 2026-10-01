@@ -693,6 +693,9 @@ def clean_empty_folders(
                     trashed_ids.add(fid)
                 except Exception as e:
                     click.secho(f"    trash 실패: {e}", fg="red")
+            else:
+                # dry-run 도 정리된 것으로 간주해야 부모 폴더까지 미리보기에 잡힘
+                trashed_ids.add(fid)
 
     click.echo()
     click.secho(
