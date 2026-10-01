@@ -189,3 +189,107 @@ class TestIsRetryable:
 
     def test_404_not_retryable(self):
         assert not _is_retryable(_http_error(404), 404)
+
+
+# ──────────────────────────────────────────────────────────
+# 신규 업로드 이중 생성 방지 (v2.4.9) — 응답 유실 후 재시도가 동명 사본을 만들던 문제
+# ──────────────────────────────────────────────────────────
+
+import threading
+
+import pytest
+
+from gdrive_sync.config import NetworkConfig
+from gdrive_sync import drive_api as _drive_api
+
+
+def _id_client(ids=("id-a", "id-b")):
+    client = _bare_client()
+    client.net = NetworkConfig(max_retries=3)
+    client._id_pool = []
+    client._id_lock = threading.Lock()
+    client.service = MagicMock()
+    client.service.files.return_value.generateIds.return_value.execute.return_value = {
+        "ids": list(ids)}
+    return client
+
+
+@pytest.fixture(autouse=False)
+def _no_sleep(monkeypatch):
+    monkeypatch.setattr(_drive_api.time, "sleep", lambda s: None)
+
+
+def test_take_file_id_batches_generate_calls():
+    """ID 는 일괄 발급 — 풀이 빌 때만 generateIds 호출 (업로드마다 호출 안 함)."""
+    client = _id_client(ids=("a", "b", "c"))
+    got = [client._take_file_id() for _ in range(3)]
+    assert sorted(got) == ["a", "b", "c"]
+    gen = client.service.files.return_value.generateIds
+    assert gen.call_count == 1
+    assert gen.call_args.kwargs["count"] == _drive_api._ID_BATCH
+
+
+def test_take_file_id_failure_returns_none():
+    """발급 실패 시 None — 업로드는 ID 없이 기존 방식으로 진행."""
+    client = _id_client()
+    client.service.files.return_value.generateIds.return_value.execute.side_effect = (
+        _http_error(400))
+    assert client._take_file_id() is None
+
+
+def test_create_once_adopts_file_after_lost_response(_no_sleep):
+    """첫 create 가 서버에선 성공했는데 응답이 timeout 으로 유실 → 재전송 없이 그 파일 채택."""
+    client = _id_client()
+    created = {"id": "id-a", "name": "a.md", "mimeType": "text/markdown", "md5Checksum": "m"}
+    request = MagicMock()
+    request.execute.side_effect = [TimeoutError("The read operation timed out")]
+    client.service.files.return_value.get.return_value.execute.return_value = created
+
+    out = client._create_once(request, "id-a")
+
+    assert out == created
+    assert request.execute.call_count == 1     # create 재전송 안 함 → 사본 없음
+
+
+def test_create_once_retries_when_first_attempt_never_landed(_no_sleep):
+    """첫 요청이 서버에 도달하지 못했으면(404) 같은 ID 로 다시 create."""
+    client = _id_client()
+    created = {"id": "id-a", "name": "a.md", "mimeType": "text/markdown"}
+    request = MagicMock()
+    request.execute.side_effect = [TimeoutError("timed out"), created]
+    client.service.files.return_value.get.return_value.execute.side_effect = _http_error(404)
+
+    out = client._create_once(request, "id-a")
+
+    assert out == created
+    assert request.execute.call_count == 2
+
+
+def test_create_once_409_race_adopts_existing(_no_sleep):
+    """확인 시점엔 없다가 재전송 때 ID 충돌(409) → 앞 요청이 커밋된 것으로 보고 채택."""
+    client = _id_client()
+    created = {"id": "id-a", "name": "a.md", "mimeType": "text/markdown"}
+    request = MagicMock()
+    request.execute.side_effect = [TimeoutError("timed out"), _http_error(409)]
+    client.service.files.return_value.get.return_value.execute.side_effect = [
+        _http_error(404), created]
+
+    out = client._create_once(request, "id-a")
+
+    assert out == created
+
+
+def test_upload_simple_sends_pregenerated_id(tmp_path, monkeypatch):
+    """신규 simple 업로드 body 에 사전 발급 ID 가 실림."""
+    client = _id_client(ids=("id-x",))
+    monkeypatch.setattr(_drive_api, "MediaFileUpload", MagicMock())
+    files = client.service.files.return_value
+    files.create.return_value.execute.return_value = {
+        "id": "id-x", "name": "a.md", "mimeType": "text/markdown"}
+    f = tmp_path / "a.md"
+    f.write_text("x")
+
+    out = client._upload_simple(f, "parent", "a.md", None, None, None, 1)
+
+    assert out.id == "id-x"
+    assert files.create.call_args.kwargs["body"]["id"] == "id-x"

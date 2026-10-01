@@ -48,6 +48,9 @@ config.py  ─▶ config.yaml + device_overrides + performance/bandwidth/schedul
 - v2.4.8: **Drive 빈 폴더 껍데기 잔존 수정** — `_prune_empty_remote_dirs` 가 형제 빈 폴더 삭제 전에
   부모를 '자식 있음'으로 확정해 `_build/v06` 등 상위가 남던 버그. 후보+상위를 모아 깊은 순 1회 검사로 변경.
   `clean-empty-folders` dry-run 이 부모 폴더를 누락하던 문제도 수정. 266 tests
+- v2.4.9: **신규 업로드 이중 생성 방지** — simple upload 의 `files().create` 가 응답 유실(read timeout)·5xx
+  재시도 때 동명 사본을 만들던 문제. `generateIds` 로 사전 발급(100개 일괄)한 ID 를 body 에 지정하고,
+  재시도 전 그 ID 존재 시 채택(`_create_once`). 같은 ID 재생성은 Drive 가 409 로 거부함을 실측. 272 tests
 
 ## 주요 구현 사항
 - **병렬 전송** (`transfer_pool.py`): ThreadPoolExecutor, 스레드별 DriveClient, 공유 path_cache (Lock)

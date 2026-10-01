@@ -97,6 +97,9 @@ WORKSPACE_MIMES = frozenset({
 
 FOLDER_MIME = "application/vnd.google-apps.folder"
 
+# 신규 업로드용 file ID 일괄 발급 단위 (generateIds 최대 1000)
+_ID_BATCH = 100
+
 FILE_FIELDS = "id, name, mimeType, size, modifiedTime, md5Checksum, parents, trashed"
 LIST_FIELDS = f"nextPageToken, files({FILE_FIELDS})"
 
@@ -176,6 +179,10 @@ class DriveClient:
             path_cache if path_cache is not None else {"": "root"}
         )
         self._path_cache_lock = path_cache_lock or threading.Lock()
+
+        # 신규 업로드용 사전 발급 file ID 풀 (_take_file_id 참조)
+        self._id_pool: list[str] = []
+        self._id_lock = threading.Lock()
 
     # ──────────────────────────────────────────────
     # 재시도 래퍼
@@ -512,15 +519,81 @@ class DriveClient:
             )
         else:
             body = {"name": name, "parents": [parent_id]}
+            file_id = self._take_file_id()
+            if file_id:
+                body["id"] = file_id
             request = self.service.files().create(
                 body=body,
                 media_body=media,
                 fields=FILE_FIELDS,
             )
+            if file_id:
+                response = self._create_once(request, file_id)
+                if progress_cb:
+                    progress_cb(total, total)
+                return DriveFile.from_api(response)
         response = self._retry(lambda: request.execute())
         if progress_cb:
             progress_cb(total, total)
         return DriveFile.from_api(response)
+
+    def _take_file_id(self) -> Optional[str]:
+        """신규 파일용 file ID 를 사전 발급 풀에서 하나 꺼냄 (비면 _ID_BATCH 개 일괄 발급).
+
+        create 요청에 ID 를 박아 두면 재시도가 같은 파일을 가리키므로 이중 생성이 안 됨.
+        일괄 발급이라 추가 API 호출은 업로드 _ID_BATCH 건당 1회.
+        발급 실패 시 None — 호출측은 ID 없이 기존 방식으로 업로드.
+        """
+        with self._id_lock:
+            if not self._id_pool:
+                try:
+                    resp = self._retry(lambda: self.service.files().generateIds(
+                        count=_ID_BATCH, space="drive", type="files",
+                    ).execute())
+                    self._id_pool = list(resp.get("ids") or [])
+                except Exception as e:
+                    log.debug(f"file ID 사전 발급 실패 (ID 없이 업로드): {e}")
+                    return None
+            return self._id_pool.pop() if self._id_pool else None
+
+    def _create_once(self, request, file_id: str) -> dict:
+        """ID 를 지정한 create 를 재시도하되 파일이 두 번 생기지 않게 실행.
+
+        응답 유실(read timeout)·5xx 는 서버가 이미 파일을 만든 뒤일 수 있음.
+        종전엔 같은 create 를 다시 보내 동명 사본이 생겼다 (2026-09-02·09-22 실사례).
+        재시도 전에 그 ID 의 파일이 있으면 앞 요청이 성공한 것으로 보고 그대로 채택.
+        """
+        attempt = [0]
+
+        def _run():
+            attempt[0] += 1
+            if attempt[0] > 1:
+                existing = self._get_if_exists(file_id)
+                if existing is not None:
+                    log.info(f"업로드 응답 유실 후 재시도 — 이미 생성된 파일 채택: {file_id}")
+                    return existing
+            try:
+                return request.execute()
+            except HttpError as e:
+                # 확인 직후 앞 요청이 커밋돼 ID 충돌(409)이 나는 경합 대비
+                if attempt[0] > 1 and getattr(e.resp, "status", 0) == 409:
+                    existing = self._get_if_exists(file_id)
+                    if existing is not None:
+                        return existing
+                raise
+
+        return self._retry(_run)
+
+    def _get_if_exists(self, file_id: str) -> Optional[dict]:
+        """file_id 메타데이터 조회. 없으면(404) None."""
+        try:
+            return self.service.files().get(
+                fileId=file_id, fields=FILE_FIELDS,
+            ).execute()
+        except HttpError as e:
+            if getattr(e.resp, "status", 0) == 404:
+                return None
+            raise
 
     def _upload_resumable(
         self, local_path, parent_id, name, existing_id,
